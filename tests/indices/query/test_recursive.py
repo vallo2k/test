@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from gpt_index.composability.graph import ComposableGraph
+from gpt_index.composability.composable_graph import ComposableGraph
 from gpt_index.data_structs.struct_type import IndexStructType
 from gpt_index.indices.keyword_table.simple_base import GPTSimpleKeywordTableIndex
 from gpt_index.indices.list.base import GPTListIndex

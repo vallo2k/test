@@ -1,14 +1,15 @@
-"""Composability graphs."""
+"""Base graph."""
 
 import json
-from typing import Any, Dict, List, Optional, Type, Union
+from abc import abstractmethod
+from typing import Any, Dict, List, Optional, Sequence, Type, Union
 
 from gpt_index.data_structs.data_structs import IndexStruct
 from gpt_index.data_structs.struct_type import IndexStructType
 from gpt_index.docstore import DocumentStore
 from gpt_index.embeddings.base import BaseEmbedding
 from gpt_index.embeddings.openai import OpenAIEmbedding
-from gpt_index.indices.base import BaseGPTIndex
+from gpt_index.indices.base import DOCUMENTS_INPUT, BaseGPTIndex
 from gpt_index.indices.keyword_table.base import GPTKeywordTableIndex
 from gpt_index.indices.list.base import GPTListIndex
 from gpt_index.indices.prompt_helper import PromptHelper
@@ -28,7 +29,6 @@ from gpt_index.response.schema import Response
 # TMP: refactor query config type
 QUERY_CONFIG_TYPE = Union[Dict, QueryConfig]
 
-
 # this is a map from type to outer index class
 # we extract the type_to_struct and type_to_query
 # fields from the index class
@@ -45,7 +45,7 @@ DEFAULT_INDEX_REGISTRY_MAP: Dict[IndexStructType, Type[BaseGPTIndex]] = {
 }
 
 
-def _get_default_index_registry() -> IndexRegistry:
+def get_default_index_registry() -> IndexRegistry:
     """Get default index registry."""
     index_registry = IndexRegistry()
     for index_type, index_class in DEFAULT_INDEX_REGISTRY_MAP.items():
@@ -64,8 +64,40 @@ def _safe_get_index_struct(
     return index_struct
 
 
-class ComposableGraph:
-    """Composable graph."""
+class BaseGraphBuilder:
+    """Base graph builder.
+
+    Used for building certain types of graphs over documents.
+
+    """
+
+    def __init__(
+        self,
+        docstore: Optional[DocumentStore] = None,
+        index_registry: Optional[IndexRegistry] = None,
+        llm_predictor: Optional[LLMPredictor] = None,
+        prompt_helper: Optional[PromptHelper] = None,
+        embed_model: Optional[BaseEmbedding] = None,
+        chunk_size_limit: Optional[int] = None,
+    ) -> None:
+        """Init params."""
+        self._docstore = docstore or DocumentStore()
+        self._index_registry = index_registry or IndexRegistry()
+        self._llm_predictor = llm_predictor or LLMPredictor()
+        self._prompt_helper = prompt_helper or PromptHelper.from_llm_predictor(
+            self._llm_predictor, chunk_size_limit=chunk_size_limit
+        )
+        self._embed_model = embed_model or OpenAIEmbedding()
+
+    @abstractmethod
+    def build_graph_from_documents(
+        self, documents: Sequence[DOCUMENTS_INPUT], verbose: bool = False, **kwargs: Any
+    ) -> "Graph":
+        """Build graph from documents."""
+
+
+class Graph:
+    """Base graph."""
 
     def __init__(
         self,
@@ -90,9 +122,14 @@ class ComposableGraph:
         self._embed_model = embed_model or OpenAIEmbedding()
 
     @classmethod
-    def build_from_index(self, index: BaseGPTIndex) -> "ComposableGraph":
-        """Build from index."""
-        return ComposableGraph(
+    def build_from_index(self, index: BaseGPTIndex) -> "Graph":
+        """Build graph from index.
+
+        Args:
+            index (BaseGPTIndex): The index to build the graph from.
+
+        """
+        return Graph(
             index.docstore,
             index.index_registry,
             # this represents the "root" index struct
@@ -135,7 +172,7 @@ class ComposableGraph:
         )
 
     @classmethod
-    def load_from_disk(cls, save_path: str, **kwargs: Any) -> "ComposableGraph":
+    def load_from_disk(cls, save_path: str, **kwargs: Any) -> "Graph":
         """Load index from disk.
 
         This method loads the index from a JSON file stored on disk. The index data
@@ -153,7 +190,7 @@ class ComposableGraph:
         with open(save_path, "r") as f:
             result_dict = json.load(f)
             # TODO: this is hardcoded for now, allow it to be specified by the user
-            index_registry = _get_default_index_registry()
+            index_registry = get_default_index_registry()
             docstore = DocumentStore.load_from_dict(
                 result_dict["docstore"], index_registry.type_to_struct
             )
@@ -177,3 +214,8 @@ class ComposableGraph:
         }
         with open(save_path, "w") as f:
             json.dump(out_dict, f)
+
+
+# TODO: for backwards compatibility
+ComposableGraph = Graph
+
